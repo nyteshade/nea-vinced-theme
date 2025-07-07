@@ -41,7 +41,7 @@
 
 /* Program information */
 #define PROG_NAME "ViNCEd_Theme"
-#define PROG_VERSION "1.1"
+#define PROG_VERSION "1.2"
 #define PROG_DATE "23.6.2025"
 
 /* AmigaDOS version string for 'version' command */
@@ -236,19 +236,19 @@ UWORD convert_to_16bit_rgb(const UBYTE *input)
     ULONG divisor = 1;
     char *frac_start = dot_pos + 1;
     char *p = frac_start;
-    
+
     /* Get integer part */
     if (dot_pos > (char *)clean_input) {
       int_part = atol((char *)clean_input);
     }
-    
+
     /* Get fractional part and divisor */
     while (*p && (*p >= '0' && *p <= '9')) {
       frac_part = frac_part * 10 + (*p - '0');
       divisor *= 10;
       p++;
     }
-    
+
     /* Convert to 16-bit value */
     if (int_part >= 1) {
       return 0xFFFF;  /* 1.0 or greater */
@@ -1023,25 +1023,25 @@ BOOL convert_to_ansi_colors(ColorList *colors, AnsiColor *ansi_colors)
   ULONG r_val, g_val, b_val;
   int color_index = 0;
   int i;
-  
+
   if (!colors || !ansi_colors) return FALSE;
-  
+
   /* Initialize all colors to defaults first */
   for (i = 0; i < 16; i++) {
     ansi_colors[i] = default_ansi_colors[i];
   }
-  
+
   /* Parse color entries, skipping CURSORCOLOR */
   entry = colors->first;
   while (entry && color_index < 16) {
     line = entry->line;
-    
+
     /* Skip CURSORCOLOR entries */
     if (starts_with(line, "CURSORCOLOR=")) {
       entry = entry->next;
       continue;
     }
-    
+
     /* Process COLOR entries */
     if (starts_with(line, "COLOR=")) {
       equals_pos = strchr(line, '=');
@@ -1057,29 +1057,29 @@ BOOL convert_to_ansi_colors(ColorList *colors, AnsiColor *ansi_colors)
               r_val = strtoul(hex_start + 2, NULL, 16);
               g_val = strtoul(hex2 + 2, NULL, 16);
               b_val = strtoul(hex3 + 2, NULL, 16);
-              
+
               /* Convert 16-bit to 8-bit */
               ansi_colors[color_index].red = (r_val >> 8) & 0xFF;
               ansi_colors[color_index].green = (g_val >> 8) & 0xFF;
               ansi_colors[color_index].blue = (b_val >> 8) & 0xFF;
-              
+
               /* Check for LOAD/NOLOAD flag */
               if (strstr(line, "LOAD")) {
                 ansi_colors[color_index].load_flag = TRUE;
               } else {
                 ansi_colors[color_index].load_flag = FALSE;
               }
-              
+
               color_index++;
             }
           }
         }
       }
     }
-    
+
     entry = entry->next;
   }
-  
+
   return TRUE;
 }
 
@@ -1243,7 +1243,7 @@ int main(VOID)
   if (success && args[ARG_VIEW])
   {
     AnsiColor ansi_colors[16];
-    
+
     /* Convert ColorList to AnsiColor array */
     if (convert_to_ansi_colors(&theme_colors, ansi_colors))
     {
