@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Understanding AmigaOS CLI Tools: Building a Theme Manager</title>
+  <link rel="stylesheet" href="tutorial-style.css" />
+</head>
+<body>
+  <h1>Understanding AmigaOS CLI Tools: Building a Theme Manager</h1>
+
+  <p>
+    This tutorial explains how CLI tools work on AmigaOS by examining a theme manager for the ViNCEd terminal. We'll explore how Amiga's approach to command-line interfaces differs from modern systems and why these patterns still matter today.
+  </p>
+
+  <div class="toc">
+    <h3>What You'll Learn</h3>
+    <ul>
+      <li><a href="#cli-philosophy">1. The Amiga CLI Philosophy</a></li>
+      <li><a href="#readargs">2. ReadArgs: The Most Elegant Argument Parser</a></li>
+      <li><a href="#file-system">3. AmigaDOS File System Concepts</a></li>
+      <li><a href="#preferences">4. How Amiga Preferences Work</a></li>
+      <li><a href="#color-formats">5. Why Color Formats Matter</a></li>
+      <li><a href="#error-handling">6. Error Handling Without Exceptions</a></li>
+      <li><a href="#integration">7. Integrating GUI with CLI</a></li>
+      <li><a href="#modern-lessons">8. Lessons for Modern CLI Design</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2 id="cli-philosophy">1. The Amiga CLI Philosophy</h2>
+
+    <p>
+      AmigaOS had a unique approach to command-line interfaces that influenced modern CLI design. Unlike Unix, which treats everything as text streams, Amiga treats CLI tools as first-class citizens with structured interfaces.
+    </p>
+
+    <h3>Key Differences from Unix/Modern CLIs</h3>
+
+    <div class="comparison">
+      <div>
+        <h4>Unix/Linux Approach</h4>
+        <ul>
+          <li>Parse argv[] manually</li>
+          <li>Text streams (stdin/stdout)</li>
+          <li>Return codes: 0 = success</li>
+          <li>Man pages for documentation</li>
+          <li>Flags like -v, --verbose</li>
+        </ul>
+      </div>
+      <div>
+        <h4>AmigaOS Approach</h4>
+        <ul>
+          <li>ReadArgs() does parsing</li>
+          <li>Structured messages</li>
+          <li>Return codes: 0 = success, 5 = warn, 10 = error, 20 = fail</li>
+          <li>Built-in help with ?</li>
+          <li>Keywords like VERBOSE/S</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>The Template System</h3>
+
+    <p>
+      Every Amiga CLI tool defines its interface with a template string. This is like having the argument parser and help system built into the OS:
+    </p>
+
+    <pre><code>TEMPLATE: "THEMEFILE,USE/S,SAVE/S,RESET/S,CHECK/S,LOAD/S,NOLOAD/S,ANSI/S,NOANSI/S,VIEW/S"</code></pre>
+
+    <p>
+      This single line tells the system:
+    </p>
+    <ul>
+      <li><code>THEMEFILE</code> - A positional argument (the file path)</li>
+      <li><code>USE/S</code> - A switch (boolean flag)</li>
+      <li><code>SAVE/S</code> - Another switch</li>
+      <li>And so on...</li>
+    </ul>
+
+    <p>
+      When users type <code>ViNCEd_Theme ?</code>, the system automatically shows:
+    </p>
+    <pre><code>THEMEFILE,USE/S,SAVE/S,RESET/S,CHECK/S,LOAD/S,NOLOAD/S,ANSI/S,NOANSI/S,VIEW/S:</code></pre>
+
+    <div class="info">
+      <strong>Modern Parallel:</strong> This is similar to how modern CLI libraries like Python's argparse or Go's cobra work, but it was built into the OS in 1985!
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="readargs">2. ReadArgs: The Most Elegant Argument Parser</h2>
+
+    <p>
+      ReadArgs() is perhaps the most elegant argument parsing system ever created. It handles everything that modern CLI libraries do, but in a fraction of the code.
+    </p>
+
+    <h3>How ReadArgs Works</h3>
+
+    <ol>
+      <li>You define a template string</li>
+      <li>You provide a structure to fill</li>
+      <li>ReadArgs() does all the parsing</li>
+      <li>You get typed values, not strings</li>
+    </ol>
+
+    <h3>Argument Types</h3>
+
+    <table>
+      <tr>
+        <th>Type</th>
+        <th>Template</th>
+        <th>Example</th>
+        <th>Modern Equivalent</th>
+      </tr>
+      <tr>
+        <td>String</td>
+        <td>NAME</td>
+        <td>ViNCEd_Theme mycolors.theme</td>
+        <td>Positional argument</td>
+      </tr>
+      <tr>
+        <td>Number</td>
+        <td>SIZE/N</td>
+        <td>SIZE 1024</td>
+        <td>--size=1024</td>
+      </tr>
+      <tr>
+        <td>Switch</td>
+        <td>VERBOSE/S</td>
+        <td>VERBOSE</td>
+        <td>--verbose</td>
+      </tr>
+      <tr>
+        <td>Required</td>
+        <td>FILE/A</td>
+        <td>Must provide FILE</td>
+        <td>Required argument</td>
+      </tr>
+      <tr>
+        <td>Multiple</td>
+        <td>FILES/M</td>
+        <td>file1 file2 file3</td>
+        <td>Variadic arguments</td>
+      </tr>
+      <tr>
+        <td>Keyword</td>
+        <td>FROM/K</td>
+        <td>FROM source.txt</td>
+        <td>--from=source.txt</td>
+      </tr>
+    </table>
+
+    <h3>Why This Matters</h3>
+
+    <p>
+      ReadArgs() enforces consistency across all CLI tools:
+    </p>
+    <ul>
+      <li>Every tool uses the same syntax</li>
+      <li>Help is always available with ?</li>
+      <li>Parsing is always correct</li>
+      <li>No need to write parsing code</li>
+    </ul>
+
+    <div class="note">
+      <strong>Design Insight:</strong> By making argument parsing a system service, AmigaOS ensured consistency across all CLI tools. This is why Amiga users could learn new tools quickly - they all worked the same way.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="file-system">3. AmigaDOS File System Concepts</h2>
+
+    <p>
+      AmigaDOS has a unique approach to file systems that's different from Unix. Understanding these differences explains many design decisions in our theme manager.
+    </p>
+
+    <h3>BCPL Pointers</h3>
+
+    <p>
+      AmigaDOS was originally written in BCPL, not C. This means some system structures use BCPL pointers, which are different:
+    </p>
+
+    <ul>
+      <li><strong>C pointer:</strong> Points to bytes</li>
+      <li><strong>BCPL pointer:</strong> Points to longwords (4 bytes)</li>
+      <li><strong>Conversion:</strong> BADDR() and MKBADDR() macros</li>
+    </ul>
+
+    <pre><code>/* Converting BCPL to C pointer */
+char *filename = BADDR(lock->fl_Name);</code></pre>
+
+    <h3>File Handles vs File Descriptors</h3>
+
+    <div class="comparison">
+      <div>
+        <h4>Unix/POSIX</h4>
+        <ul>
+          <li>Integer file descriptors</li>
+          <li>0 = stdin, 1 = stdout, 2 = stderr</li>
+          <li>read()/write() with buffers</li>
+          <li>Everything is a file</li>
+        </ul>
+      </div>
+      <div>
+        <h4>AmigaDOS</h4>
+        <ul>
+          <li>BPTR file handles</li>
+          <li>Input()/Output() for console</li>
+          <li>Read()/Write() with addresses</li>
+          <li>Devices are message ports</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Path Handling</h3>
+
+    <p>
+      AmigaDOS paths are different from Unix:
+    </p>
+
+    <ul>
+      <li><code>DH0:</code> - Device name (like drive letter)</li>
+      <li><code>Work:</code> - Assigned name (like symbolic link)</li>
+      <li><code>/</code> - Parent directory (not root!)</li>
+      <li><code>:</code> - Root of current device</li>
+    </ul>
+
+    <p>
+      So <code>Work:Projects/Theme.c</code> might resolve to <code>DH0:Development/Projects/Theme.c</code>
+    </p>
+
+    <div class="info">
+      <strong>Modern Relevance:</strong> This assignment system inspired drive mapping in Windows and volume mounting in macOS. The idea of logical names for physical locations is now universal.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="preferences">4. How Amiga Preferences Work</h2>
+
+    <p>
+      The Amiga approach to preferences is different from modern systems. Instead of plists or JSON, Amiga uses structured text files with a specific format.
+    </p>
+
+    <h3>ViNCEd Preference Format</h3>
+
+    <p>
+      ViNCEd stores its preferences as key-value pairs:
+    </p>
+
+    <pre><code>CURSORCOLOR=0xFF0000
+COLOR=0x000000
+COLOR=0x800000
+COLOR=0x008000
+LOAD
+ANSI</code></pre>
+
+    <h3>Why Not Binary Formats?</h3>
+
+    <p>
+      Unlike IFF (Interchange File Format) which Amiga used for binary data, text preferences have advantages:
+    </p>
+
+    <ul>
+      <li>Human readable and editable</li>
+      <li>Easy to version control</li>
+      <li>Simple to parse</li>
+      <li>Corruption is visible</li>
+    </ul>
+
+    <h3>The Backup Pattern</h3>
+
+    <p>
+      Our theme manager always creates .bak files before modifying preferences. This pattern is important because:
+    </p>
+
+    <ul>
+      <li>No automatic undo in 1985</li>
+      <li>No version control systems</li>
+      <li>Floppy disks could fail</li>
+      <li>Users expected safety</li>
+    </ul>
+
+    <div class="comparison">
+      <div>
+        <h4>Modern Approach</h4>
+        <ul>
+          <li>Preferences in ~/Library/Preferences</li>
+          <li>Automatic versioning</li>
+          <li>Time Machine backups</li>
+          <li>Cloud sync</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Amiga Approach</h4>
+        <ul>
+          <li>Preferences in program directory</li>
+          <li>Manual .bak files</li>
+          <li>User responsible for backups</li>
+          <li>No sync (what network?)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="color-formats">5. Why Color Formats Matter</h2>
+
+    <p>
+      Our theme manager supports multiple color formats because different users think about colors differently. This flexibility is a key design principle.
+    </p>
+
+    <h3>Supported Formats</h3>
+
+    <table>
+      <tr>
+        <th>Format</th>
+        <th>Example</th>
+        <th>Use Case</th>
+        <th>User Type</th>
+      </tr>
+      <tr>
+        <td>16-bit Hex</td>
+        <td>0xFFFF</td>
+        <td>ViNCEd native format</td>
+        <td>Power users</td>
+      </tr>
+      <tr>
+        <td>8-bit Hex</td>
+        <td>0xFF</td>
+        <td>Web colors (#RRGGBB)</td>
+        <td>Web developers</td>
+      </tr>
+      <tr>
+        <td>Integer</td>
+        <td>255</td>
+        <td>Common RGB values</td>
+        <td>Artists</td>
+      </tr>
+      <tr>
+        <td>Float</td>
+        <td>0.5</td>
+        <td>Normalized values</td>
+        <td>Scientists</td>
+      </tr>
+    </table>
+
+    <h3>The Challenge: No Floating Point</h3>
+
+    <p>
+      Many Amiga systems had no FPU (Floating Point Unit). Our code handles float parsing using only integer math:
+    </p>
+
+    <ol>
+      <li>Find the decimal point</li>
+      <li>Parse integer and fractional parts</li>
+      <li>Scale by powers of 10</li>
+      <li>Convert to 16-bit value</li>
+    </ol>
+
+    <p>
+      This is why <code>0.5</code> becomes <code>0x7FFF</code> (32767 in decimal - half of 65535).
+    </p>
+
+    <h3>Color Philosophy</h3>
+
+    <p>
+      Supporting multiple formats follows the Amiga philosophy:
+    </p>
+    <ul>
+      <li><strong>Be flexible in what you accept</strong></li>
+      <li><strong>Be consistent in what you produce</strong></li>
+      <li><strong>Let users work their way</strong></li>
+    </ul>
+
+    <div class="note">
+      <strong>Design Principle:</strong> By accepting multiple input formats but always outputting ViNCEd's native format, we make the tool friendly while maintaining consistency.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="error-handling">6. Error Handling Without Exceptions</h2>
+
+    <p>
+      C has no exceptions, so Amiga programs use return codes and explicit error checking. This approach, while verbose, has advantages.
+    </p>
+
+    <h3>AmigaDOS Return Codes</h3>
+
+    <table>
+      <tr>
+        <th>Code</th>
+        <th>Name</th>
+        <th>Meaning</th>
+        <th>Shell Behavior</th>
+      </tr>
+      <tr>
+        <td>0</td>
+        <td>RETURN_OK</td>
+        <td>Complete success</td>
+        <td>Continue</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>RETURN_WARN</td>
+        <td>Success with warnings</td>
+        <td>Continue (unless FAILAT 5)</td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td>RETURN_ERROR</td>
+        <td>Something failed</td>
+        <td>Stop (unless FAILAT 10)</td>
+      </tr>
+      <tr>
+        <td>20</td>
+        <td>RETURN_FAIL</td>
+        <td>Complete failure</td>
+        <td>Always stop</td>
+      </tr>
+    </table>
+
+    <h3>Error Reporting Philosophy</h3>
+
+    <p>
+      Good Amiga programs provide detailed error messages:
+    </p>
+
+    <ol>
+      <li><strong>What happened:</strong> "Failed to open file"</li>
+      <li><strong>Why it happened:</strong> "File not found"</li>
+      <li><strong>How to fix it:</strong> "Check the filename and try again"</li>
+    </ol>
+
+    <h3>The FAILAT Command</h3>
+
+    <p>
+      Amiga shells have a FAILAT level. Scripts stop if a command returns this level or higher:
+    </p>
+
+    <pre><code>FAILAT 21  ; Only stop on catastrophic failure
+Copy DF0:#? RAM: ; Might return 5 or 10, but continues
+Delete RAM:#? ALL ; Clean up regardless</code></pre>
+
+    <div class="info">
+      <strong>Modern Parallel:</strong> This is like bash's <code>set -e</code> but more flexible. PowerShell's <code>$ErrorActionPreference</code> is the closest modern equivalent.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="integration">7. Integrating GUI with CLI</h2>
+
+    <p>
+      One of ViNCEd_Theme's unique features is the VIEW switch, which opens a graphical color preview window from a CLI tool. This integration shows Amiga's unified approach to CLI and GUI.
+    </p>
+
+    <h3>Why This Was Revolutionary</h3>
+
+    <p>
+      In 1985, most systems were either CLI or GUI, not both:
+    </p>
+
+    <ul>
+      <li><strong>MS-DOS:</strong> CLI only, Windows was separate</li>
+      <li><strong>Mac:</strong> GUI only, no real CLI</li>
+      <li><strong>Unix:</strong> CLI with X11 as an afterthought</li>
+      <li><strong>Amiga:</strong> Both from day one</li>
+    </ul>
+
+    <h3>How CLI→GUI Integration Works</h3>
+
+    <ol>
+      <li>CLI tool parses theme file</li>
+      <li>Converts data to window format</li>
+      <li>Opens window on current screen</li>
+      <li>Runs event loop until closed</li>
+      <li>Returns to CLI cleanly</li>
+    </ol>
+
+    <h3>The Console Problem</h3>
+
+    <p>
+      When a CLI tool opens a window, what happens to console output? Amiga handles this elegantly:
+    </p>
+
+    <ul>
+      <li>Printf() still goes to the console</li>
+      <li>Window runs independently</li>
+      <li>Both can be active simultaneously</li>
+      <li>No output redirection needed</li>
+    </ul>
+
+    <div class="comparison">
+      <div>
+        <h4>Modern Approach</h4>
+        <pre><code># Separate tools
+theme-cli --export > colors.json
+theme-gui colors.json</code></pre>
+      </div>
+      <div>
+        <h4>Amiga Approach</h4>
+        <pre><code>; One tool, both modes
+ViNCEd_Theme mytheme VIEW</code></pre>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>Design Philosophy:</strong> By making GUI windows just another output option, Amiga encouraged tools that could work both ways. This flexibility is still rare in modern systems.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="modern-lessons">8. Lessons for Modern CLI Design</h2>
+
+    <p>
+      Many principles from AmigaOS CLI design remain relevant for modern tool development.
+    </p>
+
+    <h3>Consistency Matters</h3>
+
+    <p>
+      ReadArgs() enforced consistency across all tools:
+    </p>
+
+    <ul>
+      <li>Same argument syntax everywhere</li>
+      <li>Built-in help with ?</li>
+      <li>Predictable behavior</li>
+      <li>No learning curve for new tools</li>
+    </ul>
+
+    <p>
+      Modern CLI frameworks try to recreate this, but it was built into AmigaOS.
+    </p>
+
+    <h3>Structured Over Streamed</h3>
+
+    <div class="comparison">
+      <div>
+        <h4>Unix Philosophy</h4>
+        <ul>
+          <li>Everything is text</li>
+          <li>Pipe text between tools</li>
+          <li>Parse and re-parse</li>
+          <li>Simple but inefficient</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Amiga Philosophy</h4>
+        <ul>
+          <li>Structured data</li>
+          <li>Type-safe interfaces</li>
+          <li>Parse once</li>
+          <li>Complex but efficient</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Return Codes as Communication</h3>
+
+    <p>
+      Amiga's four-level return codes are more expressive than Unix's success/failure:
+    </p>
+
+    <ul>
+      <li><strong>OK:</strong> Everything worked perfectly</li>
+      <li><strong>WARN:</strong> Worked, but you should know something</li>
+      <li><strong>ERROR:</strong> Failed, but recoverable</li>
+      <li><strong>FAIL:</strong> Failed, stop everything</li>
+    </ul>
+
+    <p>
+      This granularity helps in scripting and automation.
+    </p>
+
+    <h3>GUI/CLI Integration</h3>
+
+    <p>
+      Modern tools are rediscovering what Amiga knew: users want both interfaces:
+    </p>
+
+    <ul>
+      <li><strong>VS Code:</strong> GUI editor with command palette</li>
+      <li><strong>Git:</strong> CLI tool with many GUI clients</li>
+      <li><strong>Docker:</strong> CLI with Dashboard GUI</li>
+    </ul>
+
+    <p>
+      The best tools offer both, letting users choose their workflow.
+    </p>
+
+    <h3>Design Principles That Endure</h3>
+
+    <ol>
+      <li><strong>Be generous in what you accept:</strong> Multiple input formats</li>
+      <li><strong>Be precise in what you output:</strong> Consistent format</li>
+      <li><strong>Fail gracefully:</strong> Detailed error messages</li>
+      <li><strong>Respect user preferences:</strong> GUI or CLI, their choice</li>
+      <li><strong>Make common things easy:</strong> Good defaults</li>
+      <li><strong>Make complex things possible:</strong> Power user features</li>
+    </ol>
+
+    <div class="info">
+      <strong>Final Thought:</strong> AmigaOS treated CLI tools as first-class applications, not second-class utilities. This respect for the command line created patterns that modern developers are still rediscovering. Whether you're building with Go, Rust, or Node.js, these principles from 1985 still apply.
+    </div>
+  </div>
+
+  <div class="center" style="margin-top: 40px; padding: 20px; background-color: white; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+    <p><strong>🖥️ Command Line Excellence: Then and Now 🖥️</strong></p>
+    <p class="small muted">
+      The Amiga showed us that command-line tools could be powerful, consistent, and user-friendly. Modern CLI frameworks like Cobra, Click, and Clap are essentially reimplementing what AmigaOS had built-in. Understanding this history helps us build better tools today.
+    </p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,4 @@
+FROM LIB:c.o "nea-vinced-theme/ViNCEd_Theme.o"+"nea-vinced-theme/amiga_color_window.o"
+TO "nea-vinced-theme/ViNCEd_Theme"
+LIB LIB:sc.lib LIB:amiga.lib
+

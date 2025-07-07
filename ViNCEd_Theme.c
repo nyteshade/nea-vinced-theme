@@ -37,7 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <math.h>
+#include "amiga_color_window.h"
 
 /* Program information */
 #define PROG_NAME "ViNCEd_Theme"
@@ -48,7 +48,7 @@
 static char version[] = "\0$VER: " PROG_NAME " " PROG_VERSION " (" PROG_DATE ") ViNCEd Theme Manager";
 
 /* ReadArgs template */
-#define TEMPLATE "THEMEFILE,USE/S,SAVE/S,RESET/S,CHECK/S,LOAD/S,NOLOAD/S,ANSI/S,NOANSI/S"
+#define TEMPLATE "THEMEFILE,USE/S,SAVE/S,RESET/S,CHECK/S,LOAD/S,NOLOAD/S,ANSI/S,NOANSI/S,VIEW/S"
 
 /* Maximum line length for preference files */
 #define MAX_LINE_LENGTH 512
@@ -71,6 +71,7 @@ enum
   ARG_NOLOAD,
   ARG_ANSI,
   ARG_NOANSI,
+  ARG_VIEW,
   ARG_COUNT
 };
 
@@ -193,7 +194,6 @@ UWORD convert_to_16bit_rgb(const UBYTE *input)
   UBYTE clean_input[32];
   UBYTE *ptr;
   ULONG value;
-  double float_val;
 
   if (!input) return 0;
 
@@ -229,13 +229,34 @@ UWORD convert_to_16bit_rgb(const UBYTE *input)
   /* Check if it contains a decimal point (floating point) */
   if (strchr(clean_input, '.'))
   {
-    float_val = atof(clean_input);
-    if (float_val < 0.0) float_val = 0.0;
-    if (float_val > 1.0) float_val = 1.0;
-
-    /* Convert 0.0-1.0 to 0x0000-0xFFFF */
-    value = (ULONG)(float_val * 65535.0 + 0.5);
-    return (UWORD)value;
+    /* Simple integer-only floating point parsing for 0.0-1.0 range */
+    char *dot_pos = strchr(clean_input, '.');
+    ULONG int_part = 0;
+    ULONG frac_part = 0;
+    ULONG divisor = 1;
+    char *frac_start = dot_pos + 1;
+    char *p = frac_start;
+    
+    /* Get integer part */
+    if (dot_pos > (char *)clean_input) {
+      int_part = atol((char *)clean_input);
+    }
+    
+    /* Get fractional part and divisor */
+    while (*p && (*p >= '0' && *p <= '9')) {
+      frac_part = frac_part * 10 + (*p - '0');
+      divisor *= 10;
+      p++;
+    }
+    
+    /* Convert to 16-bit value */
+    if (int_part >= 1) {
+      return 0xFFFF;  /* 1.0 or greater */
+    } else {
+      /* Calculate fractional value * 65535 */
+      value = (frac_part * 65535UL) / divisor;
+      return (UWORD)value;
+    }
   }
 
   /* Integer 0-255 */
@@ -647,7 +668,7 @@ BOOL read_theme_file(const UBYTE *filename, ColorList *colors, ColorOverrides *o
 
   if (!filename || !colors) return FALSE;
 
-  file = Open(filename, MODE_OLDFILE);
+  file = Open((STRPTR)filename, MODE_OLDFILE);
   if (!file)
   {
     Printf("ERROR: Could not open theme file '%s'\n", filename);
@@ -856,7 +877,7 @@ BOOL update_prefs_file(const UBYTE *prefs_path, ColorList *new_colors)
   /* Create temporary file name */
   sprintf(temp_path, "%s.tmp", prefs_path);
 
-  old_file = Open(prefs_path, MODE_OLDFILE);
+  old_file = Open((STRPTR)prefs_path, MODE_OLDFILE);
   new_file = Open(temp_path, MODE_NEWFILE);
 
   if (!new_file)
@@ -961,8 +982,8 @@ BOOL update_prefs_file(const UBYTE *prefs_path, ColorList *new_colors)
   Close(new_file);
 
   /* Replace original file with temporary file */
-  DeleteFile(prefs_path);
-  if (Rename(temp_path, prefs_path))
+  DeleteFile((STRPTR)prefs_path);
+  if (Rename(temp_path, (STRPTR)prefs_path))
   {
     success = TRUE;
     Printf("Successfully updated '%s'\n", prefs_path);
@@ -987,17 +1008,94 @@ VOID show_version(VOID)
 }
 
 /**
+ * Convert ColorList to AnsiColor array for display
+ *
+ * @param colors ColorList containing parsed theme colors
+ * @param ansi_colors Array of 16 AnsiColor structures to fill
+ * @return TRUE on success, FALSE on failure
+ */
+BOOL convert_to_ansi_colors(ColorList *colors, AnsiColor *ansi_colors)
+{
+  ColorEntry *entry;
+  UBYTE *line;
+  UBYTE *equals_pos;
+  UBYTE *hex_start;
+  ULONG r_val, g_val, b_val;
+  int color_index = 0;
+  int i;
+  
+  if (!colors || !ansi_colors) return FALSE;
+  
+  /* Initialize all colors to defaults first */
+  for (i = 0; i < 16; i++) {
+    ansi_colors[i] = default_ansi_colors[i];
+  }
+  
+  /* Parse color entries, skipping CURSORCOLOR */
+  entry = colors->first;
+  while (entry && color_index < 16) {
+    line = entry->line;
+    
+    /* Skip CURSORCOLOR entries */
+    if (starts_with(line, "CURSORCOLOR=")) {
+      entry = entry->next;
+      continue;
+    }
+    
+    /* Process COLOR entries */
+    if (starts_with(line, "COLOR=")) {
+      equals_pos = strchr(line, '=');
+      if (equals_pos) {
+        /* Find the three hex values (0x****) */
+        hex_start = strstr(equals_pos, "0x");
+        if (hex_start) {
+          UBYTE *hex2 = strstr(hex_start + 1, "0x");
+          if (hex2) {
+            UBYTE *hex3 = strstr(hex2 + 1, "0x");
+            if (hex3) {
+              /* Parse the 16-bit hex values */
+              r_val = strtoul(hex_start + 2, NULL, 16);
+              g_val = strtoul(hex2 + 2, NULL, 16);
+              b_val = strtoul(hex3 + 2, NULL, 16);
+              
+              /* Convert 16-bit to 8-bit */
+              ansi_colors[color_index].red = (r_val >> 8) & 0xFF;
+              ansi_colors[color_index].green = (g_val >> 8) & 0xFF;
+              ansi_colors[color_index].blue = (b_val >> 8) & 0xFF;
+              
+              /* Check for LOAD/NOLOAD flag */
+              if (strstr(line, "LOAD")) {
+                ansi_colors[color_index].load_flag = TRUE;
+              } else {
+                ansi_colors[color_index].load_flag = FALSE;
+              }
+              
+              color_index++;
+            }
+          }
+        }
+      }
+    }
+    
+    entry = entry->next;
+  }
+  
+  return TRUE;
+}
+
+/**
  * Display usage information
  */
 VOID show_usage(VOID)
 {
   show_version();
-  Printf("Usage: %s [THEMEFILE] [USE] [SAVE] [RESET] [CHECK] [LOAD|NOLOAD] [ANSI|NOANSI]\n\n", PROG_NAME);
+  Printf("Usage: %s [THEMEFILE] [USE] [SAVE] [RESET] [CHECK] [VIEW] [LOAD|NOLOAD] [ANSI|NOANSI]\n\n", PROG_NAME);
   Printf("THEMEFILE    - Theme file containing COLOR/CURSORCOLOR entries\n");
   Printf("USE/S        - Apply theme to ENV:ViNCEd.prefs (current session)\n");
   Printf("SAVE/S       - Apply theme to ENVARC:ViNCEd.prefs (persistent)\n");
   Printf("RESET/S      - Use default black colors (mutually exclusive)\n");
   Printf("CHECK/S      - Show parsed color entries with RGB values\n");
+  Printf("VIEW/S       - Display colors in a graphical window\n");
   Printf("LOAD/S       - Force all colors to use LOAD flag\n");
   Printf("NOLOAD/S     - Force all colors to use NOLOAD flag (default)\n");
   Printf("ANSI/S       - Force all colors to use ANSI flag\n");
@@ -1021,6 +1119,7 @@ VOID show_usage(VOID)
   Printf("  %s MyTheme.txt USE ANSI   Apply theme with ANSI flag for all colors\n", PROG_NAME);
   Printf("  %s RESET USE SAVE         Reset to defaults\n", PROG_NAME);
   Printf("  %s MyTheme.txt CHECK      Preview theme colors\n", PROG_NAME);
+  Printf("  %s MyTheme.txt VIEW       Display theme in graphical window\n", PROG_NAME);
 }
 
 /**
@@ -1089,8 +1188,8 @@ int main(VOID)
     }
   }
 
-  /* Check if no action specified, default to USE (unless CHECK only) */
-  if (!args[ARG_USE] && !args[ARG_SAVE] && !args[ARG_CHECK])
+  /* Check if no action specified, default to USE (unless CHECK or VIEW only) */
+  if (!args[ARG_USE] && !args[ARG_SAVE] && !args[ARG_CHECK] && !args[ARG_VIEW])
   {
     args[ARG_USE] = TRUE;
     Printf("No action specified, defaulting to USE\n");
@@ -1138,6 +1237,24 @@ int main(VOID)
   if (success && args[ARG_CHECK])
   {
     display_color_check(&theme_colors);
+  }
+
+  /* Display colors in window if requested */
+  if (success && args[ARG_VIEW])
+  {
+    AnsiColor ansi_colors[16];
+    
+    /* Convert ColorList to AnsiColor array */
+    if (convert_to_ansi_colors(&theme_colors, ansi_colors))
+    {
+      /* Display the color window - this will block until window is closed */
+      show_color_swatch_window(ansi_colors, NULL);
+    }
+    else
+    {
+      Printf("ERROR: Failed to convert colors for display\n");
+      success = FALSE;
+    }
   }
 
   /* Apply to ENV: if requested */

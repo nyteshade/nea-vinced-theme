@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Understanding Amiga Graphics: From 1985 to Modern UI</title>
+  <link rel="stylesheet" href="tutorial-style.css" />
+</head>
+<body>
+  <h1>Understanding Amiga Graphics: From 1985 to Modern UI</h1>
+
+  <p>
+    This tutorial explains how graphics and UI work on the Amiga by building a color picker window. We'll explore fundamental concepts that shaped modern computing and draw parallels to how you'd build the same thing on macOS today.
+  </p>
+
+  <div class="toc">
+    <h3>What You'll Learn</h3>
+    <ul>
+      <li><a href="#graphics-basics">1. How Amiga Graphics Actually Work</a></li>
+      <li><a href="#pens-vs-rgb">2. The Pen System: Why Amiga Colors Are Different</a></li>
+      <li><a href="#window-system">3. Intuition: The Amiga Window System</a></li>
+      <li><a href="#event-model">4. Message Passing vs Modern Event Handling</a></li>
+      <li><a href="#memory-model">5. Manual Memory: Life Without ARC</a></li>
+      <li><a href="#drawing-primitives">6. Drawing Without Frameworks</a></li>
+      <li><a href="#hardware-limits">7. Working With Hardware Limitations</a></li>
+      <li><a href="#modern-parallels">8. How This Relates to Modern Development</a></li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2 id="graphics-basics">1. How Amiga Graphics Actually Work</h2>
+
+    <p>
+      To understand Amiga programming, you need to understand that the Amiga was designed around custom chips that handle graphics, sound, and I/O. This is fundamentally different from modern systems where the CPU does most of the work.
+    </p>
+
+    <h3>The Custom Chips</h3>
+
+    <div class="comparison">
+      <div>
+        <h4>Amiga (1985)</h4>
+        <ul>
+          <li><strong>Agnus:</strong> Handles memory access and display generation</li>
+          <li><strong>Denise:</strong> Converts memory into pixels on screen</li>
+          <li><strong>Paula:</strong> Audio and disk I/O</li>
+          <li><strong>CPU:</strong> Orchestrates the chips</li>
+        </ul>
+      </div>
+      <div>
+        <h4>macOS (2024)</h4>
+        <ul>
+          <li><strong>GPU:</strong> Handles all graphics operations</li>
+          <li><strong>CPU:</strong> Runs your application code</li>
+          <li><strong>Unified Memory:</strong> Shared between CPU/GPU</li>
+          <li><strong>Metal/CoreGraphics:</strong> Abstract the hardware</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>What This Means for Developers</h3>
+
+    <p>
+      On Amiga, you're working much closer to the hardware. When you want to draw a rectangle, you're not calling a high-level API - you're telling the custom chips exactly what to do:
+    </p>
+
+    <pre><code>/* Amiga: Direct hardware manipulation */
+SetAPen(rastport, 2);  /* Select pen 2 from the palette */
+RectFill(rastport, x1, y1, x2, y2);  /* Tell Denise to fill these pixels */
+
+/* macOS: High-level abstraction */
+CGContextSetFillColorWithColor(context, CGColorCreateRGB(1.0, 0.0, 0.0, 1.0));
+CGContextFillRect(context, CGRectMake(x, y, width, height));</code></pre>
+
+    <div class="note">
+      <strong>Key Insight:</strong> The Amiga's custom chips meant that certain operations (like copying blocks of memory or drawing filled rectangles) were incredibly fast for 1985. The blitter chip could move memory while the CPU did other work - a concept that wouldn't become common on PCs until hardware acceleration in the late 1990s.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="pens-vs-rgb">2. The Pen System: Why Amiga Colors Are Different</h2>
+
+    <p>
+      One of the most confusing aspects of Amiga programming for modern developers is the pen system. Let me explain why it exists and how it works.
+    </p>
+
+    <h3>The Problem: Limited Memory</h3>
+
+    <p>
+      In 1985, memory was incredibly expensive. A typical Amiga had 256KB-512KB of RAM. Storing full RGB values for every pixel would be impossible:
+    </p>
+
+    <ul>
+      <li>320×200 screen = 64,000 pixels</li>
+      <li>24-bit RGB = 3 bytes per pixel</li>
+      <li>Total = 192KB just for one screen!</li>
+    </ul>
+
+    <h3>The Solution: Color Palettes</h3>
+
+    <p>
+      Instead of storing RGB values for each pixel, the Amiga stores a pen number (like an index) that points to a color in a palette:
+    </p>
+
+    <pre><code>/* How it works conceptually */
+Color Palette:
+  Pen 0: RGB(0,0,0)      /* Black */
+  Pen 1: RGB(255,255,255) /* White */
+  Pen 2: RGB(255,0,0)    /* Red */
+  Pen 3: RGB(0,255,0)    /* Green */
+
+Screen Memory:
+  Pixel[0,0] = 2  /* This pixel uses Pen 2 (Red) */
+  Pixel[0,1] = 1  /* This pixel uses Pen 1 (White) */</code></pre>
+
+    <div class="comparison">
+      <div>
+        <h4>Amiga Approach</h4>
+        <ul>
+          <li>4 bitplanes = 16 colors max</li>
+          <li>Each pixel stores 4 bits (0-15)</li>
+          <li>Memory per screen: 32KB</li>
+          <li>Colors can be changed instantly</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Modern Approach</h4>
+        <ul>
+          <li>32-bit RGBA per pixel</li>
+          <li>Each pixel stores full color</li>
+          <li>Memory per 4K screen: 33MB</li>
+          <li>Unlimited colors</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Working with Pens in Our Color Window</h3>
+
+    <p>
+      Our color window has to be smart about pen allocation. Depending on the screen mode, we might have 2, 4, 8, 16, or 256 colors available. Here's how we handle it:
+    </p>
+
+    <ol>
+      <li><strong>2 colors:</strong> Just black and white - we repeat them</li>
+      <li><strong>4 colors:</strong> Map our 16 ANSI colors to the 4 available</li>
+      <li><strong>16 colors:</strong> Perfect match for ANSI colors</li>
+      <li><strong>256+ colors:</strong> We can allocate exact colors</li>
+    </ol>
+
+    <div class="info">
+      <strong>Modern Parallel:</strong> This is similar to how GIF images work - they use a palette of up to 256 colors. It's also why CSS named colors exist - they're essentially a modern "pen system" for convenience.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="window-system">3. Intuition: The Amiga Window System</h2>
+
+    <p>
+      Intuition is the Amiga's window system, and it works quite differently from modern window managers. Understanding these differences helps explain our design choices.
+    </p>
+
+    <h3>Creating a Window: Then vs Now</h3>
+
+    <table>
+      <tr>
+        <th>Aspect</th>
+        <th>Amiga Intuition</th>
+        <th>macOS AppKit</th>
+      </tr>
+      <tr>
+        <td>Window Creation</td>
+        <td>Fill out a NewWindow structure with 20+ fields</td>
+        <td>Subclass NSWindow or use Interface Builder</td>
+      </tr>
+      <tr>
+        <td>Event Handling</td>
+        <td>Poll a message port for events</td>
+        <td>Delegate methods and target-action</td>
+      </tr>
+      <tr>
+        <td>Drawing</td>
+        <td>Draw immediately when needed</td>
+        <td>Mark dirty, draw in drawRect:</td>
+      </tr>
+      <tr>
+        <td>Memory</td>
+        <td>You own everything, must free it</td>
+        <td>ARC handles most memory</td>
+      </tr>
+    </table>
+
+    <h3>The IDCMP: Intuition Direct Communication Message Port</h3>
+
+    <p>
+      The IDCMP is how your program receives events. You specify which events you want:
+    </p>
+
+    <pre><code>WA_IDCMP, IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_RAWKEY</code></pre>
+
+    <p>
+      This is brilliant for 1985 - you only get the events you ask for, saving CPU cycles. Modern systems generate all events and let you ignore what you don't want.
+    </p>
+
+    <h3>Window Borders and Dragging</h3>
+
+    <p>
+      Our color window uses custom borders instead of system borders. Here's why:
+    </p>
+
+    <ul>
+      <li><strong>System borders</strong> eat into your drawing area</li>
+      <li><strong>Custom borders</strong> give you pixel-perfect control</li>
+      <li><strong>Drag bars</strong> were a separate concept from title bars</li>
+    </ul>
+
+    <p>
+      We use <code>WFLG_DRAGBAR</code> to make our window draggable even without a visible title bar - this was revolutionary UI design in 1985!
+    </p>
+
+    <div class="note">
+      <strong>Historical Note:</strong> The Amiga's draggable windows anywhere on screen predated Windows and Mac having this feature by years. The ability to drag windows partially off-screen was considered amazing.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="event-model">4. Message Passing vs Modern Event Handling</h2>
+
+    <p>
+      The Amiga's event system is based on message passing, which is actually more like modern actor systems than traditional event loops.
+    </p>
+
+    <h3>How Amiga Events Work</h3>
+
+    <ol>
+      <li>System puts messages in your window's port</li>
+      <li>You check the port when convenient</li>
+      <li>Process messages in order</li>
+      <li>YOU MUST reply to each message</li>
+    </ol>
+
+    <pre><code>/* The Amiga way */
+while (running) {
+    WaitPort(window->UserPort);  /* Sleep until message arrives */
+    while (msg = GetMsg(window->UserPort)) {
+        /* Handle message */
+        ReplyMsg(msg);  /* CRITICAL: Must reply! */
+    }
+}</code></pre>
+
+    <h3>Why ReplyMsg() is Critical</h3>
+
+    <p>
+      This is a key difference from modern systems. In Amiga, the system is literally waiting for you to acknowledge the message. If you don't reply:
+    </p>
+
+    <ul>
+      <li>System runs out of message memory</li>
+      <li>Other programs can't get events</li>
+      <li>System becomes unresponsive</li>
+    </ul>
+
+    <div class="comparison">
+      <div>
+        <h4>Amiga Message Passing</h4>
+        <ul>
+          <li>Synchronous acknowledgment required</li>
+          <li>Messages are system resources</li>
+          <li>Order is guaranteed</li>
+          <li>Can process at your own pace</li>
+        </ul>
+      </div>
+      <div>
+        <h4>macOS NSEvent</h4>
+        <ul>
+          <li>Fire-and-forget events</li>
+          <li>Events are copies</li>
+          <li>Some reordering possible</li>
+          <li>Must process quickly</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Keyboard Events: Raw Keys vs Characters</h3>
+
+    <p>
+      Amiga gives you raw key codes, not characters. This means:
+    </p>
+
+    <ul>
+      <li>You get key down AND key up events</li>
+      <li>You must map keys to characters yourself</li>
+      <li>But you can detect any key combination</li>
+    </ul>
+
+    <p>
+      Our RightAmiga+C shortcut check shows this:
+    </p>
+
+    <pre><code>if ((qualifier & IEQUALIFIER_RCOMMAND) && (code == 0x33)) {
+    /* 0x33 is the raw code for the C key */
+}</code></pre>
+
+    <div class="info">
+      <strong>Modern Parallel:</strong> This is like the difference between keyCode and key in JavaScript keyboard events. Raw keys let you implement game controls, while character events are better for text input.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="memory-model">5. Manual Memory: Life Without ARC</h2>
+
+    <p>
+      Perhaps the biggest adjustment for modern developers is manual memory management. There's no garbage collection, no ARC, no smart pointers - just you and raw memory.
+    </p>
+
+    <h3>The Amiga Memory System</h3>
+
+    <p>
+      Amiga has different types of memory, and you need to know which to use:
+    </p>
+
+    <table>
+      <tr>
+        <th>Memory Type</th>
+        <th>Use For</th>
+        <th>Why</th>
+      </tr>
+      <tr>
+        <td>MEMF_CHIP</td>
+        <td>Graphics, sound data</td>
+        <td>Accessible by custom chips</td>
+      </tr>
+      <tr>
+        <td>MEMF_FAST</td>
+        <td>Program code, variables</td>
+        <td>Only CPU can access (faster)</td>
+      </tr>
+      <tr>
+        <td>MEMF_PUBLIC</td>
+        <td>Shared between programs</td>
+        <td>System structures</td>
+      </tr>
+      <tr>
+        <td>MEMF_CLEAR</td>
+        <td>Any allocation you want zeroed</td>
+        <td>Like calloc() in C</td>
+      </tr>
+    </table>
+
+    <h3>Resource Pairing Pattern</h3>
+
+    <p>
+      Every Amiga resource follows a strict pairing pattern:
+    </p>
+
+    <pre><code>/* Pattern: Allocate → Use → Free */
+screen = LockPubScreen(NULL);        /* Lock the screen */
+if (screen) {
+    /* Use screen */
+    UnlockPubScreen(NULL, screen);   /* Unlock when done */
+}
+
+window = OpenWindow(&newWindow);     /* Open window */
+if (window) {
+    /* Use window */
+    CloseWindow(window);             /* Close when done */
+}</code></pre>
+
+    <h3>Why Our Cleanup Function Looks Like That</h3>
+
+    <p>
+      Our cleanup function frees resources in reverse order. This isn't just good practice - it's required:
+    </p>
+
+    <ol>
+      <li>Free pens (they belong to the screen)</li>
+      <li>Close window (it's attached to the screen)</li>
+      <li>Close font (if we opened it)</li>
+      <li>Unlock screen (now safe to release)</li>
+      <li>Free our structure (nothing depends on it)</li>
+    </ol>
+
+    <div class="warning">
+      <strong>Critical Rule:</strong> Always free dependencies before the things they depend on. Freeing a screen before its windows = crash.
+    </div>
+
+    <div class="comparison">
+      <div>
+        <h4>Amiga Manual Memory</h4>
+        <pre><code>ptr = AllocVec(size, MEMF_CLEAR);
+/* Use ptr */
+FreeVec(ptr);</code></pre>
+      </div>
+      <div>
+        <h4>Modern Objective-C with ARC</h4>
+        <pre><code>NSObject *obj = [[NSObject alloc] init];
+/* Use obj */
+/* Automatically freed when out of scope */</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="drawing-primitives">6. Drawing Without Frameworks</h2>
+
+    <p>
+      On Amiga, there's no Cocoa, no UIKit, no high-level drawing frameworks. You have basic primitives and you build everything from them.
+    </p>
+
+    <h3>The RastPort: Your Drawing Context</h3>
+
+    <p>
+      A RastPort is like CGContext, but much simpler:
+    </p>
+
+    <ul>
+      <li>It knows which bitmap to draw into</li>
+      <li>It has a current pen (foreground color)</li>
+      <li>It has a current position (for line drawing)</li>
+      <li>It has a font for text</li>
+    </ul>
+
+    <h3>Building UI Elements from Primitives</h3>
+
+    <p>
+      Our cycle gadget (the RGB/HEX/PEN selector) shows how you build complex UI from simple parts:
+    </p>
+
+    <ol>
+      <li><strong>Background:</strong> RectFill() with the background pen</li>
+      <li><strong>Border:</strong> Move() and Draw() to create lines</li>
+      <li><strong>Text:</strong> Text() to draw the current mode</li>
+      <li><strong>Arrows:</strong> More Move() and Draw() calls</li>
+    </ol>
+
+    <p>
+      There's no NSButton or UIButton - you draw everything and track the mouse yourself:
+    </p>
+
+    <pre><code>/* Check if mouse is in button */
+if (mouseX >= button.x && mouseX < button.x + button.width &&
+    mouseY >= button.y && mouseY < button.y + button.height) {
+    /* Mouse is in button */
+}</code></pre>
+
+    <h3>The 3D Button Effect</h3>
+
+    <p>
+      We create 3D-looking buttons using just two colors:
+    </p>
+
+    <ul>
+      <li>Light color on top/left = raised appearance</li>
+      <li>Dark color on bottom/right = shadow</li>
+      <li>Swap them when pressed = sunken appearance</li>
+    </ul>
+
+    <p>
+      This technique was revolutionary in 1985 and became standard in all GUIs by 1990.
+    </p>
+
+    <div class="info">
+      <strong>Design Evolution:</strong> This manual approach to creating UI elements is why Amiga developers became excellent at pixel-perfect design. When you have to draw every pixel yourself, you think carefully about each one.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="hardware-limits">7. Working With Hardware Limitations</h2>
+
+    <p>
+      Our color window adapts to wildly different hardware capabilities. Understanding why teaches important lessons about responsive design.
+    </p>
+
+    <h3>The Hardware Variations</h3>
+
+    <table>
+      <tr>
+        <th>Year</th>
+        <th>Chipset</th>
+        <th>Colors</th>
+        <th>Resolution</th>
+        <th>Our Strategy</th>
+      </tr>
+      <tr>
+        <td>1985</td>
+        <td>OCS</td>
+        <td>32 from 4096</td>
+        <td>320×200 to 640×400</td>
+        <td>Find closest matches</td>
+      </tr>
+      <tr>
+        <td>1990</td>
+        <td>ECS</td>
+        <td>32 from 4096</td>
+        <td>Up to 1280×512</td>
+        <td>Better resolution support</td>
+      </tr>
+      <tr>
+        <td>1992</td>
+        <td>AGA</td>
+        <td>256 from 16.7M</td>
+        <td>Up to 1280×512</td>
+        <td>Allocate exact colors</td>
+      </tr>
+      <tr>
+        <td>1994+</td>
+        <td>RTG</td>
+        <td>16.7M</td>
+        <td>Any</td>
+        <td>Full color accuracy</td>
+      </tr>
+    </table>
+
+    <h3>Non-Square Pixels</h3>
+
+    <p>
+      One bizarre aspect of old computers: pixels weren't square! NTSC displays had rectangular pixels, so we must adjust:
+    </p>
+
+    <pre><code>/* Adjust border width for pixel aspect ratio */
+adjusted_width = (BORDER_WIDTH * aspect_x) / aspect_y;</code></pre>
+
+    <p>
+      Without this, circles look like ovals and squares look like rectangles. Modern developers rarely think about this because all modern displays have square pixels.
+    </p>
+
+    <h3>Color Allocation Strategies</h3>
+
+    <p>
+      Depending on available colors, we use different strategies:
+    </p>
+
+    <ol>
+      <li><strong>2-4 colors:</strong> Pattern repetition (colors 0,1,2,3,0,1,2,3...)</li>
+      <li><strong>8 colors:</strong> Map bright colors to their normal equivalents</li>
+      <li><strong>16 colors:</strong> Perfect for ANSI, some pens reserved by system</li>
+      <li><strong>256+ colors:</strong> Allocate exact colors on demand</li>
+    </ol>
+
+    <div class="note">
+      <strong>Modern Relevance:</strong> This adaptive approach is exactly like responsive web design - same content, different presentation based on capabilities. The Amiga taught us to never assume hardware capabilities.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 id="modern-parallels">8. How This Relates to Modern Development</h2>
+
+    <p>
+      Many "modern" concepts in UI development were pioneered on the Amiga. Understanding these connections helps you appreciate both systems better.
+    </p>
+
+    <h3>Concepts That Started on Amiga</h3>
+
+    <table>
+      <tr>
+        <th>Amiga Innovation (1985)</th>
+        <th>Modern Equivalent</th>
+        <th>When Mainstream</th>
+      </tr>
+      <tr>
+        <td>Draggable windows anywhere</td>
+        <td>Standard in all OSes</td>
+        <td>Windows 95 / Mac OS 8</td>
+      </tr>
+      <tr>
+        <td>Hardware acceleration (Blitter)</td>
+        <td>GPU acceleration</td>
+        <td>Late 1990s</td>
+      </tr>
+      <tr>
+        <td>Preemptive multitasking</td>
+        <td>Standard in all OSes</td>
+        <td>Windows NT / Mac OS X</td>
+      </tr>
+      <tr>
+        <td>Interprocess communication</td>
+        <td>XPC, D-Bus, etc.</td>
+        <td>2000s</td>
+      </tr>
+      <tr>
+        <td>Adaptive color depth</td>
+        <td>Responsive images</td>
+        <td>2010s (Web)</td>
+      </tr>
+    </table>
+
+    <h3>Building the Same Color Window Today</h3>
+
+    <div class="comparison">
+      <div>
+        <h4>Our Amiga Approach</h4>
+        <ul>
+          <li>2,500 lines of C code</li>
+          <li>Manual memory management</li>
+          <li>Draw every pixel ourselves</li>
+          <li>Handle all mouse tracking</li>
+          <li>Adapt to hardware manually</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Modern SwiftUI</h4>
+        <pre><code>struct ColorGrid: View {
+    let colors: [Color]
+    @State var selected: Int = 0
+    
+    var body: some View {
+        LazyVGrid(columns: [
+            GridItem(.adaptive(minimum: 44))
+        ]) {
+            ForEach(0..<16) { i in
+                colors[i]
+                    .frame(width: 44, height: 44)
+                    .onTapGesture {
+                        selected = i
+                    }
+            }
+        }
+    }
+}</code></pre>
+      </div>
+    </div>
+
+    <h3>What We Can Learn</h3>
+
+    <ol>
+      <li><strong>Constraints breed creativity:</strong> Limited colors led to better design thinking</li>
+      <li><strong>Know your layers:</strong> Understanding the hardware makes you a better programmer</li>
+      <li><strong>Manual has merits:</strong> Drawing everything yourself gives perfect control</li>
+      <li><strong>Efficiency matters:</strong> When you have 7MHz, every cycle counts</li>
+      <li><strong>User experience is timeless:</strong> Good UI patterns transcend technology</li>
+    </ol>
+
+    <h3>The Cycle Gadget Pattern</h3>
+
+    <p>
+      Our cycle gadget (clicking cycles through RGB→HEX→PEN) demonstrates a pattern that's everywhere today:
+    </p>
+
+    <ul>
+      <li><strong>iOS:</strong> Segmented controls</li>
+      <li><strong>Web:</strong> Toggle button groups</li>
+      <li><strong>Android:</strong> Chip groups</li>
+    </ul>
+
+    <p>
+      The visual design (sunken field with arrows) clearly communicates "this cycles through options" - a pattern so successful it barely changed in 40 years.
+    </p>
+
+    <div class="info">
+      <strong>Final Thought:</strong> The Amiga forced developers to think about every byte and every cycle. While modern frameworks abstract this away, understanding these fundamentals makes you a better developer. When your SwiftUI view is slow, you'll know why. When your web app uses too much memory, you'll understand what's happening.
+    </div>
+  </div>
+
+  <div class="center" style="margin-top: 40px; padding: 20px; background-color: white; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+    <p><strong>🖥️ From Hardware to High-Level 🖥️</strong></p>
+    <p class="small muted">
+      The Amiga taught us that great software comes from understanding your platform deeply. Whether you're managing pens on a 32-color screen or building with SwiftUI on a Pro Display XDR, the principles remain the same: respect your users, understand your constraints, and build thoughtfully.
+    </p>
+  </div>
+</body>
+</html>
